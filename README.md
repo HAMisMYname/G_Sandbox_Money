@@ -5,6 +5,6 @@ A simple garry's mod money system added to sandbox. very basic UI open to custom
  - Place the money_system.lua in your autorun folder. the script will do the rest. if you want to view money data directly its saved to "garrysmod/data/g_sandbox_money/"
 
 <b>Admin/Server Commands</b>
-" gsm_add_money <playername> <amount>"
-" gsm_remove_money <playername> <amount>"
-" gsm_check_money <playername>"
+- gsm_add_money PLAYERNAME AMOUNT
+- gsm_remove_money PLAYERNAME AMOUNT
+- gsm_check_money PLAYERNAME
